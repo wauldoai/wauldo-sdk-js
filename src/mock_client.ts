@@ -7,6 +7,8 @@ import type {
   ChatRequest,
   ChatResponse,
   EmbeddingResponse,
+  GuardMode,
+  GuardResponse,
   ModelInfo,
   ModelList,
   OrchestratorResponse,
@@ -144,6 +146,31 @@ export class MockHttpClient {
   conversation(options?: { system?: string; model?: string }): Conversation {
     this.record('conversation', options);
     return new Conversation(this, options);
+  }
+
+  async guard(
+    text: string,
+    sourceContext: string,
+    mode: GuardMode = 'lexical',
+    _options?: RequestOptions,
+  ): Promise<GuardResponse> {
+    this.record('guard', text, sourceContext, mode);
+    const textNums = new Set(text.match(/\b\d+(?:\.\d+)?\b/g) ?? []);
+    const srcNums = new Set(sourceContext.match(/\b\d+(?:\.\d+)?\b/g) ?? []);
+    const mismatch = textNums.size > 0 && srcNums.size > 0
+      && [...textNums].some(n => !srcNums.has(n));
+    if (mismatch) {
+      return {
+        verdict: 'rejected', action: 'block', hallucination_rate: 1, mode,
+        total_claims: 1, supported_claims: 0, confidence: 0,
+        claims: [{ text, supported: false, confidence: 0.3, verdict: 'rejected', action: 'block', reason: 'numerical_mismatch' }],
+      };
+    }
+    return {
+      verdict: 'verified', action: 'allow', hallucination_rate: 0, mode,
+      total_claims: 1, supported_claims: 1, confidence: 0.95,
+      claims: [{ text, supported: true, confidence: 0.95, verdict: 'verified', action: 'allow' }],
+    };
   }
 
   async ragAsk(question: string, text: string, source = 'document'): Promise<string> {

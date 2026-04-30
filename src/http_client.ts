@@ -10,6 +10,8 @@ import type {
   ChatRequest,
   ChatResponse,
   EmbeddingResponse,
+  GuardMode,
+  GuardResponse,
   HttpClientConfig,
   ModelList,
   OrchestratorResponse,
@@ -202,6 +204,46 @@ export class HttpClient {
     await this.ragUpload(text, source);
     const result = await this.ragQuery(question, 3);
     return result.answer ?? JSON.stringify(result.sources);
+  }
+
+  // ── Guard (Fact-Check) ─────────────────────────────────────────────
+
+  /**
+   * POST /v1/fact-check — Verify text claims against source context.
+   *
+   * Guard is a hallucination firewall: checks whether LLM output is supported
+   * by source documents. Blocks wrong answers before they reach users.
+   *
+   * @param text - The LLM-generated text to verify
+   * @param sourceContext - The ground-truth source document(s)
+   * @param mode - "lexical" (<1ms), "hybrid" (~50ms), or "semantic" (~500ms)
+   * @param options - Optional per-request overrides
+   *
+   * @example
+   * ```typescript
+   * const result = await client.guard(
+   *   'Returns accepted within 60 days',
+   *   'Our return policy: 14 days.',
+   * );
+   * if (result.action === 'block') {
+   *   console.log('Hallucination caught:', result.claims[0]?.reason);
+   * }
+   * ```
+   */
+  async guard(
+    text: string,
+    sourceContext: string,
+    mode: GuardMode = 'lexical',
+    options?: RequestOptions,
+  ): Promise<GuardResponse> {
+    const data = await fetchWithRetry<GuardResponse>(
+      this.retryConfig,
+      'POST',
+      '/v1/fact-check',
+      { text, source_context: sourceContext, mode },
+      options?.timeoutMs,
+    );
+    return validateResponse<GuardResponse>(data, 'GuardResponse');
   }
 
   // ── Orchestrator endpoints ───────────────────────────────────────────

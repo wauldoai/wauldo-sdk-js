@@ -53,7 +53,7 @@ export type {
 } from './types.js';
 
 // HTTP API Helpers
-export { chatContent } from './http_types.js';
+export { chatContent, guardIsSafe, guardIsBlocked } from './http_types.js';
 
 // HTTP API Types
 export type {
@@ -72,8 +72,29 @@ export type {
   RagAuditInfo,
   RagQueryResponse,
   OrchestratorResponse,
+  GuardClaim,
+  GuardResponse,
+  GuardMode,
   HttpClientConfig,
   LogLevel,
   RequestOptions,
   ChatClientLike,
 } from './http_types.js';
+
+// Deployed Agents + Tasks (create, run, poll, stream)
+export { AgentsClient, HttpError, isTerminalStatus, supportScore } from './agents.js';
+export type {
+  AgentsClientConfig,
+  DeployedAgent,
+  CreateAgentInput,
+  UpdateAgentPatch,
+  AgentListResponse,
+  AgentRunResponse,
+  A2aResponse,
+  Verdict,
+  TaskStatus,
+  TaskClaim,
+  TaskVerification,
+  Task,
+  StateTransition,
+} from './agents.js';

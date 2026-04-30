@@ -121,6 +121,48 @@ export interface RagQueryResponse {
   grounded?: boolean;
 }
 
+// ── Guard (Fact-Check) ──────────────────────────────────────────────────
+
+/** A single verified claim from the Guard response */
+export interface GuardClaim {
+  text: string;
+  claim_type?: string;
+  supported: boolean;
+  confidence: number;
+  confidence_label?: string;
+  verdict: string;
+  action: string;
+  reason?: string | null;
+  evidence?: string | null;
+}
+
+/** Response from POST /v1/fact-check — the Guard verification API */
+export interface GuardResponse {
+  verdict: string;
+  action: string;
+  hallucination_rate: number;
+  mode: string;
+  total_claims: number;
+  supported_claims: number;
+  confidence: number;
+  claims: GuardClaim[];
+  mode_warning?: string;
+  processing_time_ms?: number;
+}
+
+/** Check if a GuardResponse allows the content through */
+export function guardIsSafe(response: GuardResponse): boolean {
+  return response.verdict === 'verified';
+}
+
+/** Check if a GuardResponse blocks the content */
+export function guardIsBlocked(response: GuardResponse): boolean {
+  return response.action === 'block';
+}
+
+/** Guard verification modes */
+export type GuardMode = 'lexical' | 'hybrid' | 'semantic';
+
 // ── Orchestrator ────────────────────────────────────────────────────────
 
 export interface OrchestratorResponse {
