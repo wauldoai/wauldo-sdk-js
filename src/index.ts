@@ -98,3 +98,13 @@ export type {
   Task,
   StateTransition,
 } from './agents.js';
+
+// Funnel #1 — Audit history (read + export + RTBF)
+export { HistoryClient } from './history.js';
+export type {
+  HistoryClientConfig,
+  HistoryListResponse,
+  TaskHistoryEntry,
+  ListOptions as HistoryListOptions,
+  ExportOptions as HistoryExportOptions,
+} from './history.js';
