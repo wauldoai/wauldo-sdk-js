@@ -2,6 +2,25 @@
 
 All notable changes to the Wauldo TypeScript SDK.
 
+## [0.13.0] - 2026-05-14
+
+### Added
+- `WorkflowsClient` — six methods covering the Wauldo Workflow Runtime surface (`create`, `list`, `get`, `delete`, `startRun`, `getRun`) plus a `waitForRun` polling helper. Mirrors the `/v1/workflows*` endpoints shipped in rev 63 (Phase 1+2 runtime: Task / Choice / Wait / Pass / Fail / Succeed state machines).
+- Top-level exports: `WorkflowsClient`, `isWorkflowRunTerminal`, `TERMINAL_WORKFLOW_STATUSES`, plus types `Workflow`, `CreateWorkflowInput`, `WorkflowListResponse`, `StartRunResponse`, `WorkflowExecution`.
+
+## [0.12.0] - 2026-05-08
+
+### Added
+- `AgentsClient.shareTask(taskId)` → `Promise<ShareResponse>` — publish a verified run as a public URL (`https://wauldo.com/r/<id>`). Idempotent ; free tier gets a 30-day TTL, paid tenants get `expires_at = null`.
+- `AgentsClient.unshareTask(taskId)` → `Promise<void>` — revoke a published run.
+- `ShareResponse` interface exported.
+
+## [0.11.0] - 2026-05-05
+
+### Added
+- `AgentsClient.createRevision()`, `listRevisions()`, `getRevision()`, `setActiveRevision()` — ECS-style immutable revisions for `custom_preset` agents (O(1) rollback, no LLM cost).
+- Types: `AgentRevision`, `CreateRevisionInput`, `CreateRevisionResponse`, `ListRevisionsResponse` (re-exported from `wauldo`).
+
 ## [0.10.0] - 2026-04-30
 
 ### Added

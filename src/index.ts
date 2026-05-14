@@ -97,7 +97,22 @@ export type {
   TaskVerification,
   Task,
   StateTransition,
+  AgentRevision,
+  CreateRevisionInput,
+  CreateRevisionResponse,
+  ListRevisionsResponse,
 } from './agents.js';
+
+// Workflow Runtime (Step Functions style state machines)
+export { WorkflowsClient, isWorkflowRunTerminal, TERMINAL_WORKFLOW_STATUSES } from './workflows.js';
+export type {
+  WorkflowsClientConfig,
+  Workflow,
+  CreateWorkflowInput,
+  WorkflowListResponse,
+  StartRunResponse,
+  WorkflowExecution,
+} from './workflows.js';
 
 // Funnel #1 — Audit history (read + export + RTBF)
 export { HistoryClient } from './history.js';

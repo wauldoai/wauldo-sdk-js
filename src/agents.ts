@@ -79,6 +79,55 @@ export interface AgentRunResponse {
   created_at: number;
 }
 
+/**
+ * Immutable snapshot of an agent's `AgentContractV2` payload, content-addressed
+ * via SHA-256 and identified by a monotone `rev` integer. Mirrors AWS ECS
+ * task-definition revisions: append-only, O(1) rollback via `setActiveRevision`.
+ */
+export interface AgentRevision {
+  rev: number;
+  sha256: string;
+  contract_json: string;
+  created_at: number;
+  message?: string;
+  created_by?: string;
+}
+
+export interface CreateRevisionInput {
+  /** Full `AgentContractV2` JSON payload (same shape as `custom_preset` on POST /v1/agents). */
+  customPreset: Record<string, unknown>;
+  /** Optional commit-message-style note (≤256 chars). */
+  message?: string;
+  /** When `true` (default) the new revision becomes active immediately. */
+  setActive?: boolean;
+}
+
+export interface CreateRevisionResponse {
+  rev: number;
+  sha256: string;
+  active_rev: number;
+}
+
+export interface ListRevisionsResponse {
+  revisions: AgentRevision[];
+  active_rev: number;
+  head_rev: number;
+  count: number;
+}
+
+/**
+ * Result of `shareTask` / `unshareTask`.
+ *
+ * `expiresAt` is epoch milliseconds, or `null` for paid tenants
+ * (no expiration). Free-tier shares default to a 30-day TTL ; once
+ * elapsed, the public `GET /v1/runs/<shareId>` returns 404.
+ */
+export interface ShareResponse {
+  share_id: string;
+  url: string;
+  expires_at: number | null;
+}
+
 export interface A2aResponse {
   task_id: string;
   agent_id: string;
@@ -330,6 +379,63 @@ export class AgentsClient {
     await this.request<void>("DELETE", `/v1/agents/${agentId}`);
   }
 
+  // ── Revisions (ECS-style versioning) ────────────────────────────
+
+  /**
+   * `POST /v1/agents/:id/revisions` — mint an immutable revision.
+   *
+   * The server validates `customPreset` (size, depth, states, cycle, tools,
+   * quota) and stores an immutable snapshot keyed by SHA-256. When
+   * `setActive` is `true` (default) the new revision becomes the agent's
+   * live revision; `false` stages it for review.
+   */
+  async createRevision(
+    agentId: string,
+    input: CreateRevisionInput,
+  ): Promise<CreateRevisionResponse> {
+    const body: Record<string, unknown> = {
+      custom_preset: input.customPreset,
+      set_active: input.setActive ?? true,
+    };
+    if (input.message !== undefined) body.message = input.message;
+    return (await this.request<CreateRevisionResponse>(
+      "POST",
+      `/v1/agents/${agentId}/revisions`,
+      body,
+    ))!;
+  }
+
+  /** `GET /v1/agents/:id/revisions` — list revisions newest-first. */
+  async listRevisions(agentId: string): Promise<ListRevisionsResponse> {
+    return (await this.request<ListRevisionsResponse>(
+      "GET",
+      `/v1/agents/${agentId}/revisions`,
+    ))!;
+  }
+
+  /** `GET /v1/agents/:id/revisions/:rev` — fetch one revision verbatim. */
+  async getRevision(agentId: string, rev: number): Promise<AgentRevision> {
+    return (await this.request<AgentRevision>(
+      "GET",
+      `/v1/agents/${agentId}/revisions/${rev}`,
+    ))!;
+  }
+
+  /**
+   * `PATCH /v1/agents/:id/active-revision` — O(1) rollback / promotion.
+   *
+   * No LLM cost — the revision is already validated and stored. Use this
+   * to roll back to a previous good revision when the current one breaks
+   * in production.
+   */
+  async setActiveRevision(agentId: string, rev: number): Promise<DeployedAgent> {
+    return (await this.request<DeployedAgent>(
+      "PATCH",
+      `/v1/agents/${agentId}/active-revision`,
+      { rev },
+    ))!;
+  }
+
   // ── Runs ────────────────────────────────────────────────────────
 
   async run(
@@ -380,6 +486,39 @@ export class AgentsClient {
   /** `DELETE /v1/tasks/:id` — cancel a queued or running task. */
   async cancelTask(taskId: string): Promise<void> {
     await this.request<void>("DELETE", `/v1/tasks/${taskId}`);
+  }
+
+  // ── Shareable runs ──────────────────────────────────────────────
+
+  /**
+   * `POST /v1/tasks/:id/share` — publish a run as a public URL.
+   *
+   * Idempotent : calling on an already-shared task returns the existing
+   * `ShareResponse` without bumping the per-tenant cap. The returned
+   * `url` (form `https://wauldo.com/r/<id>`) can be pasted anywhere —
+   * anyone with the link sees the verdict + claims + sources + timeline
+   * through a strict-whitelist projection (no `custom_preset` /
+   * `wauldo_toml` / system prompt / tool args ever leave the tenant).
+   *
+   * Free-tier tenants get a 30-day TTL ; paid tenants get
+   * `expires_at = null` (no expiration).
+   */
+  async shareTask(taskId: string): Promise<ShareResponse> {
+    return (await this.request<ShareResponse>(
+      "POST",
+      `/v1/tasks/${taskId}/share`,
+      {},
+    ))!;
+  }
+
+  /**
+   * `DELETE /v1/tasks/:id/share` — make a published run private again.
+   *
+   * Idempotent : calling on a never-published task returns 204.
+   * Subsequent `GET /v1/runs/<shareId>` for the cleared id returns 404.
+   */
+  async unshareTask(taskId: string): Promise<void> {
+    await this.request<void>("DELETE", `/v1/tasks/${taskId}/share`);
   }
 
   /**
