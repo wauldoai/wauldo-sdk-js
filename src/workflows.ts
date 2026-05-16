@@ -170,6 +170,30 @@ export class WorkflowsClient {
     return env.workflow;
   }
 
+  /**
+   * `PATCH /v1/workflows/:id` — replace the workflow definition in place.
+   *
+   * Body shape is identical to {@link create} (`CreateWorkflowInput`). The
+   * server keeps the workflow id, tenant_id, and created_at ; refreshes
+   * name/description/start_at/states ; bumps `updated_at` and the monotonic
+   * `version` int. Same validations as create — cycles, transition targets,
+   * choice operators. Returns the updated workflow.
+   */
+  async update(workflowId: string, input: CreateWorkflowInput): Promise<Workflow> {
+    const body: Record<string, unknown> = {
+      name: input.name,
+      start_at: input.startAt,
+      states: input.states,
+    };
+    if (input.description !== undefined) body.description = input.description;
+    const env = (await this.request<WorkflowEnvelope>(
+      "PATCH",
+      `/v1/workflows/${workflowId}`,
+      body,
+    ))!;
+    return env.workflow;
+  }
+
   /** `GET /v1/workflows` — list workflows for the calling tenant. */
   async list(): Promise<WorkflowListResponse> {
     return (await this.request<WorkflowListResponse>("GET", "/v1/workflows"))!;

@@ -79,6 +79,35 @@ describe("WorkflowsClient.create", () => {
   });
 });
 
+describe("WorkflowsClient.update", () => {
+  it("PATCHes /v1/workflows/:id with the snake_case body and unwraps `workflow`", async () => {
+    let captured: { method?: string; path?: string; body?: string } = {};
+    stubFetch((url, init) => {
+      captured.method = init?.method;
+      captured.path = new URL(url).pathname;
+      captured.body = init?.body as string;
+      return new Response(JSON.stringify({ workflow: { ...sampleWorkflow, version: "2" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const c = new WorkflowsClient({ baseUrl: "http://x", apiKey: "k" });
+    const wf = await c.update("wf_1", {
+      name: "triage-v2",
+      startAt: "Compute",
+      states: { Compute: { type: "Succeed" } },
+      description: "post-fix",
+    });
+    expect(captured.method).toBe("PATCH");
+    expect(captured.path).toBe("/v1/workflows/wf_1");
+    const parsed = JSON.parse(captured.body ?? "{}");
+    expect(parsed.start_at).toBe("Compute");
+    expect(parsed.name).toBe("triage-v2");
+    expect(parsed.description).toBe("post-fix");
+    expect(wf.version).toBe("2");
+  });
+});
+
 describe("WorkflowsClient.list", () => {
   it("GETs /v1/workflows and returns the wrapper", async () => {
     stubFetch(() =>
