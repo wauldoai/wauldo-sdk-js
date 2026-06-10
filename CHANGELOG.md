@@ -2,6 +2,28 @@
 
 All notable changes to the Wauldo TypeScript SDK.
 
+## [0.16.0] - 2026-06-10
+
+### Added
+- `factCheck` / `guard`: new `FactCheckOptions` (extends `RequestOptions`) with optional `query` and `relevanceMode` — when `query` is provided, the response carries a `relevance` block (`RelevanceResult`: `score`, `verdict` relevant/partial/off_topic, `rationale`) scoring how well the text answers the question, fully decoupled from the factual verdict. `relevance_warning` explains when relevance could not be computed. Only `relevanceMode: "fast"` is supported server-side today.
+
+## [0.15.1] - 2026-06-07
+
+### Fixed
+- `factCheck`: `sourceContext` is now **required** (was optional). The server rejects a missing context with 400, so the optional form always failed at runtime. Surfaced by a live dogfooding pass.
+
+### Added
+- Client-side validation on `factCheck` (empty `text` / `sourceContext`) — throws `ValidationError` instead of a server round-trip.
+
+## [0.15.0] - 2026-06-07
+
+### Added
+- `HttpClient.factCheck(text, sourceContext?, mode?)` — canonical name for the `/v1/fact-check` verify call, matching the `fact_check` naming used across the Python and Rust SDKs. `sourceContext` is now optional (the server accepts a missing context).
+- `HttpClient.verifyCitation(text, sources?, threshold?)` — validate inline citations via `POST /v1/verify`. Closes the cross-SDK parity gap (was Python-only). New types `VerifyCitationResponse`, `CitationDetail`, `SourceChunk`.
+
+### Changed
+- `guard()` is now a deprecated back-compat alias delegating to `factCheck()`. Same applies on `MockHttpClient`.
+
 ## [0.14.0] - 2026-05-16
 
 ### Added

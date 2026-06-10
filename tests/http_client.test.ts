@@ -346,3 +346,92 @@ describe('HttpClient mock tests', () => {
     expect(collected).toEqual(['Hello', ' world']);
   });
 });
+
+describe('factCheck validation', () => {
+  it('throws when sourceContext is empty', async () => {
+    const c = new HttpClient({ baseUrl: 'http://localhost:3000' });
+    await expect(c.factCheck('some claim', '')).rejects.toThrow(/source_context is required/);
+  });
+
+  it('throws when text is empty', async () => {
+    const c = new HttpClient({ baseUrl: 'http://localhost:3000' });
+    await expect(c.factCheck('', 'context')).rejects.toThrow(/text cannot be empty/);
+  });
+
+  it('throws when relevanceMode is set without query', async () => {
+    const c = new HttpClient({ baseUrl: 'http://localhost:3000' });
+    await expect(
+      c.factCheck('claim', 'context', 'lexical', { relevanceMode: 'fast' }),
+    ).rejects.toThrow(/relevanceMode requires query/);
+  });
+});
+
+describe('factCheck relevance', () => {
+  const mockFetch = vi.fn<typeof fetch>();
+  let client: HttpClient;
+
+  const guardBody = (extra: Record<string, unknown> = {}) => ({
+    verdict: 'verified',
+    action: 'allow',
+    hallucination_rate: 0,
+    mode: 'lexical',
+    total_claims: 1,
+    supported_claims: 1,
+    confidence: 0.9,
+    claims: [],
+    processing_time_ms: 12,
+    ...extra,
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', mockFetch);
+    mockFetch.mockReset();
+    client = new HttpClient({ baseUrl: 'http://test-server:3000', maxRetries: 0 });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends query and relevance_mode, parses the relevance block', async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockJsonResponse(guardBody({ relevance: { score: 0.91, verdict: 'relevant' } })),
+    );
+
+    const result = await client.factCheck('Rust released in 2010.', 'Rust: 2010.', 'lexical', {
+      query: 'What year was Rust released?',
+      relevanceMode: 'fast',
+    });
+
+    const sent = JSON.parse(mockFetch.mock.calls[0][1]?.body as string);
+    expect(sent.query).toBe('What year was Rust released?');
+    expect(sent.relevance_mode).toBe('fast');
+    expect(result.relevance?.verdict).toBe('relevant');
+    expect(result.relevance?.score).toBe(0.91);
+    // Relevance never alters the factual verdict.
+    expect(result.verdict).toBe('verified');
+  });
+
+  it('omits query/relevance_mode when unset and tolerates their absence in the response', async () => {
+    mockFetch.mockResolvedValueOnce(mockJsonResponse(guardBody()));
+
+    const result = await client.factCheck('claim', 'context');
+
+    const sent = JSON.parse(mockFetch.mock.calls[0][1]?.body as string);
+    expect(sent).not.toHaveProperty('query');
+    expect(sent).not.toHaveProperty('relevance_mode');
+    expect(result.relevance).toBeUndefined();
+    expect(result.relevance_warning).toBeUndefined();
+  });
+
+  it('surfaces relevance_warning when relevance was not computable', async () => {
+    mockFetch.mockResolvedValueOnce(
+      mockJsonResponse(guardBody({ relevance_warning: 'relevance not computed: embeddings unavailable' })),
+    );
+
+    const result = await client.factCheck('claim', 'context', 'lexical', { query: 'What?' });
+
+    expect(result.relevance).toBeUndefined();
+    expect(result.relevance_warning).toMatch(/embeddings unavailable/);
+  });
+});

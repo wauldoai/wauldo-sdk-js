@@ -116,6 +116,21 @@ console.log(result.action);           // "block"
 console.log(result.claims[0].reason); // "numerical_mismatch"
 ```
 
+Optionally score how well the text answers the original question — decoupled
+from the factual verdict (a verified answer can still be off-topic):
+
+```typescript
+const result = await client.factCheck(
+  'Rust was first released in 2010 by Mozilla Research.',
+  'Rust is a systems language released in 2010 by Mozilla Research.',
+  'lexical',
+  { query: 'What year was Rust released?' },
+);
+console.log(result.verdict);            // "verified"
+console.log(result.relevance?.verdict); // "relevant" | "partial" | "off_topic"
+console.log(result.relevance?.score);   // cosine similarity — interpret through verdict, not absolute value
+```
+
 ### Deployed Agents — create, run, stream
 
 ```typescript

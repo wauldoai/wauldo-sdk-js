@@ -7,6 +7,7 @@ import type {
   ChatRequest,
   ChatResponse,
   EmbeddingResponse,
+  FactCheckOptions,
   GuardMode,
   GuardResponse,
   ModelInfo,
@@ -14,7 +15,10 @@ import type {
   OrchestratorResponse,
   RagQueryResponse,
   RagUploadResponse,
+  RelevanceResult,
   RequestOptions,
+  SourceChunk,
+  VerifyCitationResponse,
 } from './http_types.js';
 
 /** Default chat response returned when none is configured */
@@ -148,13 +152,54 @@ export class MockHttpClient {
     return new Conversation(this, options);
   }
 
+  async factCheck(
+    text: string,
+    sourceContext: string,
+    mode: GuardMode = 'lexical',
+    options?: FactCheckOptions,
+  ): Promise<GuardResponse> {
+    return this.guard(text, sourceContext, mode, options);
+  }
+
+  async verifyCitation(
+    text: string,
+    sources?: SourceChunk[],
+    threshold?: number,
+    _options?: RequestOptions,
+  ): Promise<VerifyCitationResponse> {
+    this.record('verifyCitation', text, sources, threshold);
+    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    const citationCount = (text.match(/\[[^\]]+\]/g) ?? []).length;
+    const ratio = sentences.length > 0 ? citationCount / sentences.length : 0;
+    return {
+      citation_ratio: ratio,
+      has_sufficient_citations: ratio >= (threshold ?? 0.5),
+      sentence_count: sentences.length,
+      citation_count: citationCount,
+      uncited_sentences: [],
+    };
+  }
+
   async guard(
     text: string,
     sourceContext: string,
     mode: GuardMode = 'lexical',
-    _options?: RequestOptions,
+    options?: FactCheckOptions,
   ): Promise<GuardResponse> {
-    this.record('guard', text, sourceContext, mode);
+    this.record('guard', text, sourceContext, mode, options);
+    // Mock relevance: crude word-overlap between query and text — decoupled
+    // from the factual verdict, mirroring the real server contract.
+    let relevance: RelevanceResult | undefined;
+    if (options?.query !== undefined) {
+      const queryWords = new Set(options.query.toLowerCase().match(/\w+/g) ?? []);
+      const textWords = new Set(text.toLowerCase().match(/\w+/g) ?? []);
+      const overlap = [...queryWords].filter(w => textWords.has(w)).length;
+      const score = queryWords.size > 0 ? overlap / queryWords.size : 0;
+      relevance = {
+        score,
+        verdict: score >= 0.5 ? 'relevant' : score >= 0.25 ? 'partial' : 'off_topic',
+      };
+    }
     const textNums = new Set(text.match(/\b\d+(?:\.\d+)?\b/g) ?? []);
     const srcNums = new Set(sourceContext.match(/\b\d+(?:\.\d+)?\b/g) ?? []);
     const mismatch = textNums.size > 0 && srcNums.size > 0
@@ -164,12 +209,14 @@ export class MockHttpClient {
         verdict: 'rejected', action: 'block', hallucination_rate: 1, mode,
         total_claims: 1, supported_claims: 0, confidence: 0,
         claims: [{ text, supported: false, confidence: 0.3, verdict: 'rejected', action: 'block', reason: 'numerical_mismatch' }],
+        ...(relevance ? { relevance } : {}),
       };
     }
     return {
       verdict: 'verified', action: 'allow', hallucination_rate: 0, mode,
       total_claims: 1, supported_claims: 1, confidence: 0.95,
       claims: [{ text, supported: true, confidence: 0.95, verdict: 'verified', action: 'allow' }],
+      ...(relevance ? { relevance } : {}),
     };
   }
 

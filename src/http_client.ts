@@ -5,11 +5,12 @@
  */
 
 import { Conversation } from './conversation.js';
-import { ServerError } from './errors.js';
+import { ServerError, ValidationError } from './errors.js';
 import type {
   ChatRequest,
   ChatResponse,
   EmbeddingResponse,
+  FactCheckOptions,
   GuardMode,
   GuardResponse,
   HttpClientConfig,
@@ -18,6 +19,8 @@ import type {
   RagQueryResponse,
   RagUploadResponse,
   RequestOptions,
+  SourceChunk,
+  VerifyCitationResponse,
 } from './http_types.js';
 import { fetchWithRetry, type RetryConfig } from './retry_fetch.js';
 import { parseSSEStream } from './sse_parser.js';
@@ -230,20 +233,74 @@ export class HttpClient {
    * }
    * ```
    */
-  async guard(
+  async factCheck(
     text: string,
     sourceContext: string,
     mode: GuardMode = 'lexical',
-    options?: RequestOptions,
+    options?: FactCheckOptions,
   ): Promise<GuardResponse> {
+    if (!text) throw new ValidationError('text cannot be empty', 'text');
+    if (!sourceContext) {
+      throw new ValidationError('source_context is required for verification', 'source_context');
+    }
+    if (options?.relevanceMode !== undefined && options?.query === undefined) {
+      throw new ValidationError('relevanceMode requires query to be provided', 'relevanceMode');
+    }
+    const body: Record<string, unknown> = { text, source_context: sourceContext, mode };
+    if (options?.query !== undefined) {
+      body.query = options.query;
+    }
+    if (options?.relevanceMode !== undefined) {
+      body.relevance_mode = options.relevanceMode;
+    }
     const data = await fetchWithRetry<GuardResponse>(
       this.retryConfig,
       'POST',
       '/v1/fact-check',
-      { text, source_context: sourceContext, mode },
+      body,
       options?.timeoutMs,
     );
     return validateResponse<GuardResponse>(data, 'GuardResponse');
+  }
+
+  /** Deprecated alias for {@link HttpClient.factCheck}, kept for back-compat. */
+  async guard(
+    text: string,
+    sourceContext: string,
+    mode: GuardMode = 'lexical',
+    options?: FactCheckOptions,
+  ): Promise<GuardResponse> {
+    return this.factCheck(text, sourceContext, mode, options);
+  }
+
+  /**
+   * POST /v1/verify — Validate inline citations against sources.
+   *
+   * @param text - The AI-generated text (with or without citations).
+   * @param sources - Source chunks to validate citations against.
+   * @param threshold - Minimum citation ratio (0.0-1.0).
+   */
+  async verifyCitation(
+    text: string,
+    sources?: SourceChunk[],
+    threshold?: number,
+    options?: RequestOptions,
+  ): Promise<VerifyCitationResponse> {
+    const body: Record<string, unknown> = { text };
+    if (sources !== undefined) {
+      body.sources = sources;
+    }
+    if (threshold !== undefined) {
+      body.threshold = threshold;
+    }
+    const data = await fetchWithRetry<VerifyCitationResponse>(
+      this.retryConfig,
+      'POST',
+      '/v1/verify',
+      body,
+      options?.timeoutMs,
+    );
+    return validateResponse<VerifyCitationResponse>(data, 'VerifyCitationResponse');
   }
 
   // ── Orchestrator endpoints ───────────────────────────────────────────

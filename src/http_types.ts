@@ -136,6 +136,24 @@ export interface GuardClaim {
   evidence?: string | null;
 }
 
+/**
+ * Relevance of the answer to the user query — decoupled from factuality.
+ *
+ * A response can be fully verified against sources AND off-topic for the
+ * question asked. This block never influences `verdict` / `confidence`.
+ */
+export interface RelevanceResult {
+  /**
+   * Raw cosine similarity between query and text embeddings (0.0-1.0).
+   * Model-specific scale — interpret through `verdict`, not absolute value.
+   */
+  score: number;
+  /** relevant | partial | off_topic */
+  verdict: string;
+  /** Explanation (only populated by future judge modes) */
+  rationale?: string | null;
+}
+
 /** Response from POST /v1/fact-check — the Guard verification API */
 export interface GuardResponse {
   verdict: string;
@@ -147,6 +165,10 @@ export interface GuardResponse {
   confidence: number;
   claims: GuardClaim[];
   mode_warning?: string;
+  /** Only present when `query` was provided AND computable. Decoupled from the factual verdict. */
+  relevance?: RelevanceResult;
+  /** Why relevance could not be computed. Never set when `relevance` is present. */
+  relevance_warning?: string;
   processing_time_ms?: number;
 }
 
@@ -162,6 +184,33 @@ export function guardIsBlocked(response: GuardResponse): boolean {
 
 /** Guard verification modes */
 export type GuardMode = 'lexical' | 'hybrid' | 'semantic';
+
+// ── Citation verification (POST /v1/verify) ──────────────────────────────
+
+/** A source chunk to validate citations against */
+export interface SourceChunk {
+  name: string;
+  content: string;
+}
+
+/** One citation validation result */
+export interface CitationDetail {
+  citation: string;
+  source_name: string;
+  is_valid: boolean;
+}
+
+/** Response from POST /v1/verify — citation validation */
+export interface VerifyCitationResponse {
+  citation_ratio: number;
+  has_sufficient_citations: boolean;
+  sentence_count: number;
+  citation_count: number;
+  uncited_sentences: string[];
+  citations?: CitationDetail[];
+  phantom_count?: number;
+  processing_time_ms?: number;
+}
 
 // ── Orchestrator ────────────────────────────────────────────────────────
 
@@ -203,4 +252,19 @@ export interface HttpClientConfig {
 export interface RequestOptions {
   /** Override the default timeout for this specific request (milliseconds) */
   timeoutMs?: number;
+}
+
+/** Options for `factCheck` / `guard` — transport options plus relevance scoring */
+export interface FactCheckOptions extends RequestOptions {
+  /**
+   * Original user question. When provided, the response includes a
+   * `relevance` block scoring how well the text addresses it —
+   * decoupled from the factual verdict (verified + off_topic is valid).
+   */
+  query?: string;
+  /**
+   * Relevance scoring mode. Only "fast" (embedding cosine) is currently
+   * supported server-side. Requires `query`.
+   */
+  relevanceMode?: string;
 }

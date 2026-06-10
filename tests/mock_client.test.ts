@@ -84,4 +84,19 @@ describe('MockHttpClient', () => {
     conv.clear();
     expect(conv.getHistory()).toHaveLength(0);
   });
+
+  it('factCheck returns a relevance block when query is provided', async () => {
+    const mock = new MockHttpClient();
+    const onTopic = await mock.factCheck(
+      'Rust was released in 2010.',
+      'Rust was released in 2010.',
+      'lexical',
+      { query: 'When was Rust released?' },
+    );
+    expect(onTopic.relevance).toBeDefined();
+    expect(['relevant', 'partial', 'off_topic']).toContain(onTopic.relevance?.verdict);
+
+    const noQuery = await mock.factCheck('claim', 'claim');
+    expect(noQuery.relevance).toBeUndefined();
+  });
 });
