@@ -2,6 +2,17 @@
 
 All notable changes to the Wauldo TypeScript SDK.
 
+## [0.17.0] - 2026-11-15
+
+### Added
+- `ragUpload`: optional `piiPolicy` (`RagUploadOptions`, new `PiiPolicy` type) — `"redact"` (server default) or `"keep"` to store contact details as sent. Unknown values throw `ValidationError`.
+
+### Fixed
+- `chatStream`: a failure reported by the server mid-stream (`data: {"error": {...}}`) now throws `ServerError` carrying the server's message and error body. It was skipped, so the stream ended as an empty, apparently successful answer.
+
+### Removed
+- **Breaking:** `agentsMd` and `mcpJson` are removed from agent create/update and from the agent type. The server never used them and now ignores them; requests that still send them are accepted unchanged.
+
 ## [0.16.0] - 2026-06-10
 
 ### Added

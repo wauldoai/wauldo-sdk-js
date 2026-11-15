@@ -17,6 +17,7 @@ import type {
   ModelList,
   OrchestratorResponse,
   RagQueryResponse,
+  RagUploadOptions,
   RagUploadResponse,
   RequestOptions,
   SourceChunk,
@@ -148,14 +149,21 @@ export class HttpClient {
    *
    * @param content - The document text to index
    * @param filename - Optional filename for the document
-   * @param options - Optional per-request overrides (e.g. timeoutMs)
+   * @param options - Optional per-request overrides (e.g. timeoutMs) and
+   *   `piiPolicy` (`redact` — the server default — or `keep`)
    * @returns Upload confirmation with document_id and chunks_count
    */
   async ragUpload(
-    content: string, filename?: string, options?: RequestOptions,
+    content: string, filename?: string, options?: RagUploadOptions,
   ): Promise<RagUploadResponse> {
     const body: Record<string, unknown> = { content };
     if (filename) body['filename'] = filename;
+    if (options?.piiPolicy !== undefined) {
+      if (options.piiPolicy !== 'redact' && options.piiPolicy !== 'keep') {
+        throw new ValidationError(`piiPolicy must be "redact" or "keep", got "${String(options.piiPolicy)}"`, 'piiPolicy');
+      }
+      body['pii_policy'] = options.piiPolicy;
+    }
     const data = await fetchWithRetry<RagUploadResponse>(
       this.retryConfig, 'POST', '/v1/upload', body, options?.timeoutMs,
     );

@@ -83,6 +83,8 @@ export type {
   HttpClientConfig,
   LogLevel,
   RequestOptions,
+  RagUploadOptions,
+  PiiPolicy,
   ChatClientLike,
 } from './http_types.js';
 

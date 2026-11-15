@@ -254,6 +254,18 @@ export interface RequestOptions {
   timeoutMs?: number;
 }
 
+/**
+ * What happens to personal data (emails, phone numbers…) in an upload:
+ * `redact` replaces it with placeholders, `keep` stores your text as sent.
+ */
+export type PiiPolicy = 'redact' | 'keep';
+
+/** Options for `ragUpload` — transport options plus the PII policy */
+export interface RagUploadOptions extends RequestOptions {
+  /** Default: the server's, `redact`. Use `keep` for contact details your answers must quote. */
+  piiPolicy?: PiiPolicy;
+}
+
 /** Options for `factCheck` / `guard` — transport options plus relevance scoring */
 export interface FactCheckOptions extends RequestOptions {
   /**

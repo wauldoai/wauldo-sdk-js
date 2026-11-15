@@ -13,7 +13,6 @@
  * const agent = await agents.create({
  *   name: "sdr-bot",
  *   wauldoToml: fs.readFileSync("wauldo.toml", "utf8"),
- *   agentsMd: fs.readFileSync("AGENTS.md", "utf8"),
  * });
  * const run = await agents.run(agent.id, "Qualify acme.com");
  * console.log(run.task_id);
@@ -41,8 +40,6 @@ export interface DeployedAgent {
   name: string;
   description: string;
   wauldo_toml: string;
-  agents_md?: string;
-  mcp_json?: string;
   model_provider: string;
   model_name: string;
   preset?: string;
@@ -54,16 +51,12 @@ export interface CreateAgentInput {
   name: string;
   wauldoToml: string;
   description?: string;
-  agentsMd?: string;
-  mcpJson?: string;
   preset?: string;
 }
 
 export interface UpdateAgentPatch {
   description?: string;
   wauldoToml?: string;
-  agentsMd?: string;
-  mcpJson?: string;
   preset?: string;
 }
 
@@ -348,8 +341,6 @@ export class AgentsClient {
       wauldo_toml: input.wauldoToml,
       description: input.description ?? "",
     };
-    if (input.agentsMd !== undefined) body.agents_md = input.agentsMd;
-    if (input.mcpJson !== undefined) body.mcp_json = input.mcpJson;
     if (input.preset !== undefined) body.preset = input.preset;
     return (await this.request<DeployedAgent>("POST", "/v1/agents", body))!;
   }
@@ -369,8 +360,6 @@ export class AgentsClient {
     const body: Record<string, unknown> = {};
     if (patch.description !== undefined) body.description = patch.description;
     if (patch.wauldoToml !== undefined) body.wauldo_toml = patch.wauldoToml;
-    if (patch.agentsMd !== undefined) body.agents_md = patch.agentsMd;
-    if (patch.mcpJson !== undefined) body.mcp_json = patch.mcpJson;
     if (patch.preset !== undefined) body.preset = patch.preset;
     return (await this.request<DeployedAgent>("PATCH", `/v1/agents/${agentId}`, body))!;
   }

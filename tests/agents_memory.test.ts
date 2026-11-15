@@ -101,7 +101,6 @@ describe("AgentsClient", () => {
     const out = await client.create({
       name: "bot",
       wauldoToml: "[agent]\nname = 'x'\n[model]\nprovider = 'o'\nname = 'm'",
-      agentsMd: "---\nname: bot\n---\nBody",
       description: "test",
       preset: "general_task",
     });
@@ -113,7 +112,6 @@ describe("AgentsClient", () => {
     const body = captured[0].body as Record<string, unknown>;
     expect(body.name).toBe("bot");
     expect(body.preset).toBe("general_task");
-    expect(body.agents_md).toBe("---\nname: bot\n---\nBody");
   });
 
   it("create omits undefined optional fields", async () => {

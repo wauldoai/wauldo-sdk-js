@@ -304,6 +304,23 @@ describe('HttpClient mock tests', () => {
     expect(result.chunks_count).toBe(12);
   });
 
+  it('ragUpload() sends piiPolicy only when given, and rejects unknown values', async () => {
+    const uploadResp: RagUploadResponse = { document_id: 'd', chunks_count: 1 };
+    mockFetch.mockResolvedValueOnce(mockJsonResponse(uploadResp));
+    await client.ragUpload('Write to help@acme.example', undefined, { piiPolicy: 'keep' });
+    const sent = JSON.parse(String(mockFetch.mock.calls.at(-1)?.[1]?.body));
+    expect(sent.pii_policy).toBe('keep');
+
+    mockFetch.mockResolvedValueOnce(mockJsonResponse(uploadResp));
+    await client.ragUpload('No choice made');
+    const plain = JSON.parse(String(mockFetch.mock.calls.at(-1)?.[1]?.body));
+    expect(plain).not.toHaveProperty('pii_policy');
+
+    await expect(
+      client.ragUpload('x', undefined, { piiPolicy: 'tag' as unknown as 'keep' }),
+    ).rejects.toThrow('piiPolicy must be');
+  });
+
   it('ragQuery() returns query results', async () => {
     const queryResp: RagQueryResponse = {
       answer: 'The answer is 42',
@@ -344,6 +361,50 @@ describe('HttpClient mock tests', () => {
     }
 
     expect(collected).toEqual(['Hello', ' world']);
+  });
+
+  it('chatStream() throws ServerError on an in-band error instead of ending empty', async () => {
+    const sseChunks = [
+      'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n',
+      'data: {"error":{"message":"Internal processing error (trace: t1)","type":"server_error"}}\n\n',
+    ];
+    mockFetch.mockResolvedValueOnce(mockSSEResponse(sseChunks));
+
+    const collected: string[] = [];
+    const run = async () => {
+      for await (const chunk of client.chatStream({
+        model: 'test',
+        messages: [{ role: 'user', content: 'Hi' }],
+      })) {
+        collected.push(chunk);
+      }
+    };
+
+    await expect(run()).rejects.toMatchObject({
+      name: 'ServerError',
+      message: 'Internal processing error (trace: t1)',
+      data: { message: 'Internal processing error (trace: t1)', type: 'server_error' },
+    });
+    expect(collected).toEqual([]);
+  });
+
+  it('chatStream() treats a falsy error field as no error', async () => {
+    const sseChunks = [
+      'data: {"error":{},"choices":[{"delta":{"content":"a"}}]}\n\n',
+      'data: {"error":false,"choices":[{"delta":{"content":"b"}}]}\n\n',
+      'data: {"error":null,"choices":[{"delta":{"content":"c"}}]}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    mockFetch.mockResolvedValueOnce(mockSSEResponse(sseChunks));
+
+    const collected: string[] = [];
+    for await (const chunk of client.chatStream({
+      model: 'test',
+      messages: [{ role: 'user', content: 'Hi' }],
+    })) {
+      collected.push(chunk);
+    }
+    expect(collected).toEqual(['a', 'b', 'c']);
   });
 });
 
