@@ -1,6 +1,6 @@
 {
   "name": "wauldo",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "description": "Official TypeScript SDK for Wauldo — Verified AI answers from your documents",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -27,16 +27,15 @@
   "keywords": [
     "ai",
     "llm",
+    "rag",
+    "fact-checking",
+    "hallucination-detection",
     "openai",
-    "privacy",
-    "gdpr",
-    "chatgpt",
     "rapidapi",
     "api",
     "typescript",
     "agent",
-    "nlp",
-    "machine-learning"
+    "nlp"
   ],
   "author": "Wauldo Team",
   "license": "MIT",
