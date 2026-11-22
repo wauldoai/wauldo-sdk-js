@@ -27,6 +27,7 @@ export {
   ServerError,
   ValidationError,
   TimeoutError,
+  TaskTimeoutError,
   ToolNotFoundError,
 } from './errors.js';
 
@@ -89,7 +90,32 @@ export type {
 } from './http_types.js';
 
 // Deployed Agents + Tasks (create, run, poll, stream)
-export { AgentsClient, HttpError, isTerminalStatus, supportScore } from './agents.js';
+export {
+  AgentsClient,
+  HttpError,
+  isSettledStatus,
+  isTerminalStatus,
+  isTerminalTransition,
+  terminalPayload,
+  retryDelayMs,
+  RETRY_STATUSES,
+  RETRY_STATUSES_IDEMPOTENT,
+  IDEMPOTENT_METHODS,
+  TERMINAL_STATE_NAMES,
+  TERMINAL_CONDITIONS,
+  LONG_POLL_SECONDS,
+  MAX_WAIT_SECONDS,
+  DEFAULT_WAIT_TIMEOUT_MS,
+  STREAM_FALLBACK_TIMEOUT_MS,
+  STREAM_IDLE_TIMEOUT_MS,
+  ALREADY_FINISHED_CONDITION,
+  WITHHELD_RESULT,
+  PAUSED_EXPIRED_ERROR,
+  MAX_HITL_REASON_CHARS,
+  supportScore,
+} from './agents.js';
+export { taskErrorInfo, TASK_ERROR_CODES } from './task_errors.js';
+export type { TaskErrorInfo, TaskErrorCode } from './task_errors.js';
 export type {
   AgentsClientConfig,
   DeployedAgent,
@@ -97,6 +123,9 @@ export type {
   UpdateAgentPatch,
   AgentListResponse,
   AgentRunResponse,
+  RunOptions,
+  HitlResponse,
+  TaskDecision,
   A2aResponse,
   Verdict,
   TaskStatus,
@@ -104,11 +133,24 @@ export type {
   TaskVerification,
   Task,
   StateTransition,
+  TerminalPayload,
   AgentRevision,
   CreateRevisionInput,
   CreateRevisionResponse,
   ListRevisionsResponse,
 } from './agents.js';
+
+// Agent memory (tenant-scoped key-value store with namespaces and search)
+export { MemoryClient, NamespacedMemory } from './memory.js';
+export type {
+  MemoryClientConfig,
+  MemoryEntry,
+  MemoryListResponse,
+  MemorySearchResult,
+  MemorySearchResponse,
+  SetOptions as MemorySetOptions,
+  SearchOptions as MemorySearchOptions,
+} from './memory.js';
 
 // Workflow Runtime (Step Functions style state machines)
 export { WorkflowsClient, isWorkflowRunTerminal, TERMINAL_WORKFLOW_STATUSES } from './workflows.js';

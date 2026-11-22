@@ -6,7 +6,7 @@
  *
  * @example
  * ```ts
- * import { MemoryClient } from "wauldo/memory";
+ * import { MemoryClient } from "wauldo";
  * const mem = new MemoryClient({ baseUrl: "http://localhost:3000", apiKey: "..." });
  * await mem.set("support", "ticket-123", "Customer asked about pricing", {
  *   tags: ["urgent", "sales"],
@@ -89,12 +89,13 @@ export class MemoryClient {
       this.config.timeoutMs ?? 60_000,
     );
     try {
-      const resp = await fetch(url, {
+      const init: RequestInit = {
         method,
         headers: this.headers(),
-        body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal,
-      });
+      };
+      if (body !== undefined) init.body = JSON.stringify(body);
+      const resp = await fetch(url, init);
       if (resp.status === 204) return null;
       const bytes = await _boundedRead(resp, MAX_RESPONSE_SIZE);
       const text = new TextDecoder().decode(bytes);

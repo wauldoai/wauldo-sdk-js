@@ -124,7 +124,7 @@ export class HttpClient {
     if (!resp.ok) {
       const body = await resp.text();
       let message = body;
-      try { const j = JSON.parse(body); if (j?.error?.message) message = j.error.message; } catch {}
+      try { const j = JSON.parse(body); if (j?.error?.message) message = j.error.message; } catch { /* not JSON: keep the raw body */ }
       const err = new ServerError(`HTTP ${resp.status}: ${message}`, resp.status);
       cfg.onError?.(err);
       throw err;

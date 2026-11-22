@@ -61,7 +61,7 @@ export async function fetchWithRetry<T>(
       }
       const text = await resp.text();
       let message = text;
-      try { const j = JSON.parse(text); if (j?.error?.message) message = j.error.message; } catch {}
+      try { const j = JSON.parse(text); if (j?.error?.message) message = j.error.message; } catch { /* not JSON: keep the raw body */ }
       config.onLog?.('error', `${method} ${path} -> ${resp.status}: ${message}`);
       const err = new Error(`HTTP ${resp.status}: ${message}`);
       config.onError?.(err);

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentsClient, HttpError } from "../src/agents";
 import { MemoryClient } from "../src/memory";
+import * as pkg from "../src/index";
 
 interface Captured {
   url: string;
@@ -236,6 +237,11 @@ describe("AgentsClient", () => {
 // ─── MemoryClient tests ───────────────────────────────────────────
 
 describe("MemoryClient", () => {
+  it("is exported from the package entry point", () => {
+    // `wauldo` exposes only its root entry: a client missing there cannot be imported.
+    expect(pkg.MemoryClient).toBe(MemoryClient);
+  });
+
   const baseUrl = "http://127.0.0.1:9999";
 
   it("set posts basic body without optional fields", async () => {

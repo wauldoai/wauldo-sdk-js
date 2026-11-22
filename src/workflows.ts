@@ -261,6 +261,7 @@ export class WorkflowsClient {
     const timeoutMs = opts.timeoutMs ?? 90_000;
     const pollIntervalMs = opts.pollIntervalMs ?? 1_000;
     const deadline = Date.now() + timeoutMs;
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       const execution = await this.getRun(workflowId, executionId);
       if (isWorkflowRunTerminal(execution.status)) return execution;

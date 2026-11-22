@@ -76,6 +76,30 @@ export class TimeoutError extends WauldoError {
 }
 
 /**
+ * Thrown by `AgentsClient.waitForTask`, `runAndWait` and the fallback of
+ * `streamTask` when a task has not settled within the wait. The task itself
+ * is not affected: it keeps running on the server, and `getTask(taskId)`
+ * reads it later. A `TimeoutError` (and an `Error`), so existing
+ * `catch` blocks keep catching it. The message starts as before, then says
+ * how to keep waiting (`waitForTask(taskId)` again).
+ */
+export class TaskTimeoutError extends TimeoutError {
+  /** The task waited for. */
+  readonly taskId: string;
+  /** Its status at the last read (`"queued"`, `"running"`…). */
+  readonly lastStatus: string;
+
+  /** `timeoutMs`: the wait, in milliseconds (also `timeout`). */
+  constructor(message: string, taskId: string, lastStatus: string, timeoutMs: number) {
+    super(message, timeoutMs);
+    this.name = 'TaskTimeoutError';
+    this.taskId = taskId;
+    this.lastStatus = lastStatus;
+    Object.setPrototypeOf(this, TaskTimeoutError.prototype);
+  }
+}
+
+/**
  * Thrown when requested tool is not available
  */
 export class ToolNotFoundError extends WauldoError {

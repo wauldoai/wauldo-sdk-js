@@ -136,12 +136,14 @@ console.log(result.relevance?.score);   // cosine similarity — interpret throu
 ### Deployed Agents — create, run, stream
 
 ```typescript
-import { AgentsClient } from 'wauldo';
+import { AgentsClient, TaskTimeoutError, isTerminalTransition, taskErrorInfo, terminalPayload } from 'wauldo';
 
 const agents = new AgentsClient({
   baseUrl: 'https://api.wauldo.com',
   apiKey: 'YOUR_API_KEY',
   tenant: 'my-tenant',
+  // maxRetries: 3 (default). Transient failures are retried, Retry-After honoured:
+  // 429/503 on any call, 500/502/504 and network errors on GET only.
 });
 
 const agent = await agents.create({
@@ -151,20 +153,72 @@ const agent = await agents.create({
   preset: 'general_task', // or 'rust_backend_architect', 'rag_data_engineer', ...
 });
 
-const run = await agents.run(agent.id, 'Can I return a shirt 30 days after purchase?');
-
-// Stream reasoning live as each workflow state completes
-for await (const event of agents.streamTask(run.task_id)) {
-  console.log(`  ${event.state_name}: ${event.duration_ms}ms  (${event.completion_tokens} tok)`);
-}
-
-// Or poll for the final verified result
-const task = await agents.waitForTask(run.task_id, { timeoutMs: 120_000 });
+// One call: the server holds the response while the run completes,
+// so a quick run comes back verified in a single round-trip.
+const task = await agents.runAndWait(agent.id, 'Can I return a shirt 30 days after purchase?');
 console.log(task.result);                     // The answer
 console.log(task.verification?.verdict);      // SAFE | UNVERIFIED | BLOCK | …
 console.log(task.verification?.trust_score);  // 0.0 – 1.0
 console.log(task.verification?.message);      // Human-readable context when non-SAFE
+
+// Need progress events? Start the run, then stream each workflow state as it completes.
+const run = await agents.run(agent.id, 'Can I return a shirt 30 days after purchase?');
+for await (const event of agents.streamTask(run.task_id)) {
+  console.log(`  ${event.state_name}: ${event.duration_ms}ms  (${event.completion_tokens} tok)`);
+  if (isTerminalTransition(event)) { // last event: result + verification, nothing left to fetch
+    console.log(terminalPayload(event)?.result ?? event.condition); // payload null when withheld
+  }
+}
+
+// Batch job: no polling, the server POSTs the task to your webhook when the run ends;
+// autoShare returns a public link to the run at creation.
+const batch = await agents.run(agent.id, 'Summarise ticket #4521', undefined, undefined, {
+  webhookUrl: 'https://example.com/hooks/wauldo',
+  autoShare: true,
+});
+console.log(batch.share_url);
+
+// Waiting has a limit (timeoutMs, default 360 s: enough for ordinary runs); the task
+// keeps running past it. For long runs, pass a larger timeoutMs, stream, or use a webhook.
+try {
+  await agents.waitForTask(batch.task_id, { timeoutMs: 60_000 });
+} catch (e) {
+  if (!(e instanceof TaskTimeoutError)) throw e;
+  console.log(`${e.taskId} still ${e.lastStatus}`);
+  await agents.waitForTask(e.taskId); // keep waiting
+}
+
+// Human approval: pause a task, then approve (it runs again) or reject (cancelled).
+// The reason is stored with the decision (task.decisions). A task left paused 7 days
+// without a decision is cancelled; resumeTask() runs it again as a new task.
+await agents.pauseTask(batch.task_id, 'check the refund amount');
+await agents.approveTask(batch.task_id); // or rejectTask
+
+// A failed task is not an exception: its error is "code: message", parsed by taskErrorInfo.
+const info = taskErrorInfo(task); // { code, message } | null
+if (task.status === 'failed' && info) {
+  if (info.code === 'invalid_preset' || info.code === 'invalid_agent_config') {
+    console.error(`Fix the agent: ${info.message}`);
+  } else {
+    await agents.resumeTask(task.task_id); // transient: run it again later
+  }
+}
 ```
+
+| Code | Meaning | What to do |
+|---|---|---|
+| `invalid_preset` | The agent names a workflow preset that does not exist | Fix the agent |
+| `invalid_agent_config` | The agent's inline workflow could not be loaded | Fix the agent |
+| `rate_limited` | The model service is saturated | Retry in a few minutes |
+| `timeout` | The run did not finish within its time limit | Retry, or simplify the request |
+| `model_unavailable` | The model service is temporarily unavailable | Retry later |
+| `run_failed` | The run failed for another reason | Retry later |
+
+New codes may be added: handle an unknown one like `run_failed`. An error that
+does not start with a code (a task cancelled after 7 days without an approval
+decision) has a `null` code and the whole error in `message`.
+
+`create({ ..., customPreset })` takes an inline workflow at creation, used from the agent's first run.
 
 ### Chat (OpenAI-compatible)
 
@@ -218,6 +272,23 @@ try {
   if (error instanceof ServerError) {
     console.error(`Server error [${error.code}]: ${error.message}`);
   }
+}
+```
+
+`AgentsClient` and `WorkflowsClient` reject with `HttpError` on an
+HTTP error status. It extends `ServerError` (so `WauldoError`), with `code` set
+to the HTTP status, and keeps `status`, `statusText` and `body` (the server's
+JSON error). A wait that runs out rejects with `TaskTimeoutError`.
+
+```typescript
+import { HttpError, TaskTimeoutError } from 'wauldo';
+
+try {
+  const task = await agents.runAndWait(agentId, 'Qualify acme.com');
+} catch (e) {
+  if (e instanceof HttpError) console.error(e.status, e.body);
+  else if (e instanceof TaskTimeoutError) await agents.waitForTask(e.taskId);
+  else throw e;
 }
 ```
 
