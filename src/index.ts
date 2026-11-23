@@ -12,7 +12,7 @@
 export { AgentClient } from './client.js';
 
 // HTTP Client
-export { HttpClient } from './http_client.js';
+export { HttpClient, MAX_UPLOAD_FILE_BYTES } from './http_client.js';
 
 // Conversation helper
 export { Conversation } from './conversation.js';
@@ -85,6 +85,9 @@ export type {
   LogLevel,
   RequestOptions,
   RagUploadOptions,
+  UploadFileOptions,
+  UploadFileResponse,
+  DocumentQuality,
   PiiPolicy,
   ChatClientLike,
 } from './http_types.js';
@@ -103,6 +106,7 @@ export {
   IDEMPOTENT_METHODS,
   TERMINAL_STATE_NAMES,
   TERMINAL_CONDITIONS,
+  STREAM_LAGGED,
   LONG_POLL_SECONDS,
   MAX_WAIT_SECONDS,
   DEFAULT_WAIT_TIMEOUT_MS,
@@ -116,6 +120,13 @@ export {
 } from './agents.js';
 export { taskErrorInfo, TASK_ERROR_CODES } from './task_errors.js';
 export type { TaskErrorInfo, TaskErrorCode } from './task_errors.js';
+export type {
+  HonestySignals,
+  ContractAttestation,
+  ContractViolation,
+  RaceResult,
+  RaceCandidate,
+} from './task_verification.js';
 export type {
   AgentsClientConfig,
   DeployedAgent,

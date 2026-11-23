@@ -20,6 +20,10 @@
  */
 
 import { ServerError, TaskTimeoutError } from "./errors.js";
+import type { RaceResult, TaskVerification } from "./task_verification.js";
+
+export { supportScore } from "./task_verification.js";
+export type { TaskClaim, TaskVerification, Verdict } from "./task_verification.js";
 
 //: Max bytes the client will accept from a single response. Protects
 //: against hostile or misbehaving servers that try to stream gigabytes.
@@ -311,9 +315,11 @@ export interface ListRevisionsResponse {
 /**
  * Result of `shareTask` / `unshareTask`.
  *
- * `expiresAt` is epoch milliseconds, or `null` for paid tenants
- * (no expiration). Free-tier shares default to a 30-day TTL ; once
- * elapsed, the public `GET /v1/runs/<shareId>` returns 404.
+ * `expires_at` is epoch milliseconds: a share expires 30 days after it is
+ * published (`null` would mean no expiry; no plan has that today). Once
+ * elapsed, the public `GET /v1/runs/<shareId>` returns 404. The shared run
+ * stays available for as long as its link is valid: until `expires_at`,
+ * `unshareTask`, or the task's deletion.
  */
 export interface ShareResponse {
   share_id: string;
@@ -331,15 +337,6 @@ export interface A2aResponse {
 
 // ─── Tasks + verification types ──────────────────────────────────────
 
-/** Verification verdict returned on completed tasks. */
-export type Verdict =
-  | "SAFE"
-  | "UNCERTAIN"
-  | "PARTIAL"
-  | "BLOCK"
-  | "CONFLICT"
-  | "UNVERIFIED";
-
 /** Task lifecycle status. */
 export type TaskStatus =
   | "queued"
@@ -349,58 +346,11 @@ export type TaskStatus =
   | "failed"
   | "cancelled";
 
-/** A single verified claim from an agent output. */
-export interface TaskClaim {
-  text: string;
-  supported: boolean;
-  confidence: number;
-}
-
-/**
- * Verification block attached to completed tasks. When
- * `verification_source === "prompt_only"` the `confidence` and
- * `hallucination_rate` fields reflect self-consistency only; rely on
- * `verdict` + `support_score` (alias `trust_score`) + `message` as authoritative.
- *
- * Note: `support_score` is the public name for the same numeric value
- * the wire protocol calls `trust_score`. The JSON wire field is unchanged
- * for backward compatibility — use `supportScore(v)` to read the value
- * by its public name. New code should prefer `support_score`.
- */
-export interface TaskVerification {
-  verdict: Verdict;
-  hallucination_rate: number;
-  confidence: number;
-  trust_score: number;
-  /**
-   * Public name for `trust_score` (0-1 fraction of claims supported
-   * by the sources). Optional on the wire; always equals `trust_score`
-   * when populated. Prefer the `supportScore()` helper to read it.
-   */
-  support_score?: number;
-  verification_source: string;
-  claims: TaskClaim[];
-  verification_retries: number;
-  /** Human-readable context for non-SAFE verdicts. */
-  message?: string | null;
-  sources_cited?: number[];
-  stripped_claims?: string[];
-}
-
-/**
- * Read the support score of a verification block. Falls back to
- * `trust_score` when the optional `support_score` field is absent
- * (the JSON wire format only emits `trust_score` for backward
- * compatibility). Always returns the same numeric value either way.
- */
-export function supportScore(v: TaskVerification): number {
-  return v.support_score ?? v.trust_score;
-}
-
 /** Full task record returned by `GET /v1/tasks/:id`. */
 export interface Task {
   task_id: string;
-  tenant_id: string;
+  /** Not sent by `GET /v1/tasks/:id`. */
+  tenant_id?: string;
   status: TaskStatus;
   prompt: string;
   created_at: number;
@@ -422,6 +372,12 @@ export interface Task {
    * are kept: past that, the oldest is dropped. Absent when none.
    */
   decisions?: TaskDecision[];
+  /** Id of the public share of the run, when it was published (`autoShare` or `shareTask`). */
+  share_id?: string;
+  /** Public URL of the run, when it was published. */
+  share_url?: string;
+  /** Outcome of a fact-check race, for runs that raced several models. */
+  race_result?: RaceResult;
 }
 
 /**
@@ -471,6 +427,15 @@ export const TERMINAL_CONDITIONS: ReadonlySet<string> = new Set([
   "terminal",
   ALREADY_FINISHED_CONDITION,
 ]);
+
+/**
+ * `state_name` of the notice the server sends when the stream fell behind the
+ * run. Not a workflow state and not terminal: the run goes on and the
+ * terminal event still comes. `validation_notes` says how many transitions
+ * were skipped; the ones after it are withheld (their `condition` says so) up
+ * to the terminal event, and the task record (`getTask`) holds the full run.
+ */
+export const STREAM_LAGGED = "STREAM_LAGGED";
 
 /** State names of the stream's last event, one per terminal status. */
 export const TERMINAL_STATE_NAMES: ReadonlySet<string> = new Set([
@@ -927,8 +892,11 @@ export class AgentsClient {
    * through a strict-whitelist projection (no `custom_preset` /
    * `wauldo_toml` / system prompt / tool args ever leave the tenant).
    *
-   * Free-tier tenants get a 30-day TTL ; paid tenants get
-   * `expires_at = null` (no expiration).
+   * A share expires 30 days after it is published (`expires_at`, epoch
+   * milliseconds; `null` would mean no expiry, which no plan has today).
+   * The shared run stays available for
+   * as long as its link is valid: until it expires, is withdrawn with
+   * `unshareTask`, or the task is deleted.
    */
   async shareTask(taskId: string): Promise<ShareResponse> {
     return (await this.request<ShareResponse>(
@@ -1082,6 +1050,11 @@ export class AgentsClient {
    * `"Already finished"`, ends the generator. A task
    * paused for approval ends it without a terminal event: approve, then
    * stream again.
+   *
+   * An event named `STREAM_LAGGED` is a notice, not a state of the run: the
+   * stream fell behind, so some transitions were skipped and the next ones
+   * are withheld. It does not end the generator; the terminal event still
+   * comes, and `getTask` holds the full run.
    *
    * @example
    * ```ts

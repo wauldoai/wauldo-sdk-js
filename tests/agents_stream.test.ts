@@ -11,6 +11,7 @@ import {
   HttpError,
   isTerminalTransition,
   STREAM_IDLE_TIMEOUT_MS,
+  STREAM_LAGGED,
   terminalPayload,
   WITHHELD_RESULT,
   type StateTransition,
@@ -226,6 +227,50 @@ describe("AgentsClient.streamTask fallback", () => {
     expect(got.map((e) => e.condition)).toEqual(["Sequential execution", "terminal"]);
     expect(isTerminalTransition(got[0]!)).toBe(false);
     expect(terminalPayload(got[1]!)?.result).toBe("ok");
+  });
+
+  describe("lag notice", () => {
+    // The notice the server sends when the stream fell behind the run, and a
+    // transition withheld after it, as the server shapes them.
+    const lagCondition = "Output withheld: the stream fell behind; the task record holds the full run";
+    const lagNotice: StateTransition = {
+      ...transition(STREAM_LAGGED),
+      to_state: null,
+      condition: lagCondition,
+      raw_output: "",
+      validation_notes: ["3 transitions skipped"],
+      success: false,
+    };
+    const withheld: StateTransition = { ...transition("REVIEW"), condition: lagCondition, raw_output: "" };
+
+    it("does not end the stream", async () => {
+      const terminal: StateTransition = {
+        ...transition("TASK_COMPLETED"),
+        to_state: null,
+        condition: "terminal",
+        raw_output: JSON.stringify({ task_id: "t1", status: "completed", result: "ok" }),
+      };
+      const hits = route(
+        () => sse([lagNotice, withheld, terminal]),
+        () => json(500, {}),
+      );
+      const got = await collect(client());
+      expect(got.map((e) => e.state_name)).toEqual([STREAM_LAGGED, "REVIEW", "TASK_COMPLETED"]);
+      expect(isTerminalTransition(got[0]!)).toBe(false);
+      expect(terminalPayload(got[0]!)).toBeNull();
+      expect(terminalPayload(got[2]!)?.result).toBe("ok");
+      expect(hits).toEqual(["http://x/v1/tasks/t1/stream"]);
+    });
+
+    it("is followed by the task's terminal event when the stream closes after it", async () => {
+      route(
+        () => sse([lagNotice]),
+        () => json(200, task("completed")),
+      );
+      const got = await collect(client());
+      expect(got.map((e) => e.state_name)).toEqual([STREAM_LAGGED, "TASK_COMPLETED"]);
+      expect(terminalPayload(got[1]!)?.result).toBe("30 days");
+    });
   });
 
   it("gives a withheld run's marker, not its answer, in the event it builds", async () => {

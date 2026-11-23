@@ -2,6 +2,18 @@
 
 All notable changes to the Wauldo TypeScript SDK.
 
+## [0.19.0] - 2026-11-23
+
+### Added
+- `HttpClient.uploadFile(file, { title, piiPolicy, filename, timeoutMs })`: upload a PDF, DOCX, image or text file (`POST /v1/upload-file`, multipart, 10 MB at most for the whole request: file, file name and form fields), from a path (Node) or from bytes (`Blob`, `Uint8Array`, `ArrayBuffer`). An empty file, or one whose request would exceed the limit, is refused with `ValidationError` before anything is sent. `UploadFileOptions`, `UploadFileResponse`, `DocumentQuality` and `MAX_UPLOAD_FILE_BYTES` are exported.
+- **BREAKING (types):** `"INSUFFICIENT_CLAIMS"` in `Verdict`: the verdict of an answer too short or empty to extract a claim to verify. An exhaustive `switch` over `Verdict` (ending in `const n: never = v`) must handle it.
+- `STREAM_LAGGED`: the `state_name` of the notice the server sends when the stream fell behind the run. It is not a workflow state and not terminal: the run goes on, the terminal event still comes, and `getTask` holds the full run. `streamTask` passes it on and keeps reading.
+- `TaskVerification.honesty_signals` (`HonestySignals`), `contract_attestation` (`ContractAttestation`, `ContractViolation`), `failure_reason` and `failure_stage`; `Task.share_id`, `Task.share_url` and `Task.race_result` (`RaceResult`, `RaceCandidate`). All optional.
+
+### Changed
+- `ragUpload` refuses a request over the 10 MB limit with `ValidationError` before sending it, instead of letting the server refuse it. The limit counts the JSON body in UTF-8 bytes, file name included, not the characters of the text (an accented letter is two bytes).
+- **BREAKING (types):** `Task.tenant_id` is optional: `GET /v1/tasks/:id` does not send it, so it was typed `string` but read `undefined`. Code that passes it where a `string` is expected must handle `undefined` under `strictNullChecks`.
+
 ## [0.18.0] - 2026-11-22
 
 ### Added

@@ -40,6 +40,56 @@ describe("isTerminalStatus", () => {
   });
 });
 
+describe("AgentsClient.getTask — fields beyond the base record", () => {
+  it("passes share, race result and the verification signals through", async () => {
+    stubFetch(() => {
+      const body: Task = {
+        task_id: "t1",
+        status: "completed",
+        prompt: "hi",
+        created_at: 1,
+        updated_at: 2,
+        share_id: "r_x",
+        share_url: "https://wauldo.com/r/r_x",
+        race_result: {
+          winner: "model-a",
+          winner_score: 0.9,
+          candidates: [
+            { model: "model-a", score: 0.9, timed_out: false },
+            { model: "model-b", score: null, timed_out: true },
+          ],
+        },
+        verification: {
+          verdict: "INSUFFICIENT_CLAIMS",
+          hallucination_rate: 0,
+          confidence: 0,
+          trust_score: 0,
+          verification_source: "source_documents",
+          claims: [],
+          verification_retries: 0,
+          honesty_signals: { is_non_answer: true, json_garbage: false },
+          contract_attestation: {
+            matches: false,
+            verdict: "DEGRADED",
+            replay_token: "rt",
+            violations: [{ kind: "disallowed_tool", state: "PLAN", tool: "web_search" }],
+          },
+          failure_stage: "fact_check",
+        },
+      };
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
+    const task = await new AgentsClient({ baseUrl: "http://x" }).getTask("t1");
+    expect(task.tenant_id).toBeUndefined();
+    expect(task.share_url).toBe("https://wauldo.com/r/r_x");
+    expect(task.race_result?.candidates[1]?.timed_out).toBe(true);
+    expect(task.verification?.verdict).toBe("INSUFFICIENT_CLAIMS");
+    expect(task.verification?.honesty_signals?.is_non_answer).toBe(true);
+    expect(task.verification?.contract_attestation?.verdict).toBe("DEGRADED");
+    expect(task.verification?.failure_stage).toBe("fact_check");
+  });
+});
+
 describe("AgentsClient.getTask", () => {
   it("returns typed Task with embedded verification + message", async () => {
     stubFetch(() => {

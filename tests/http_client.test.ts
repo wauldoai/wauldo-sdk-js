@@ -2,8 +2,11 @@
  * Tests for Wauldo HTTP Client (REST API)
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HttpClient } from '../src/http_client.js';
+import { HttpClient, MAX_UPLOAD_FILE_BYTES } from '../src/http_client.js';
 import type {
   ChatMessage,
   ChatRequest,
@@ -13,6 +16,7 @@ import type {
   OrchestratorResponse,
   RagQueryResponse,
   RagUploadResponse,
+  UploadFileResponse,
 } from '../src/http_types.js';
 
 // ============================================================================
@@ -319,6 +323,101 @@ describe('HttpClient mock tests', () => {
     await expect(
       client.ragUpload('x', undefined, { piiPolicy: 'tag' as unknown as 'keep' }),
     ).rejects.toThrow('piiPolicy must be');
+  });
+
+  it('ragUpload() counts the encoded bytes against the 10 MB limit', async () => {
+    // The server's limit applies to the body as sent, in UTF-8 bytes: three
+    // million accented letters are 6 MB of text in characters, 6 MB more in bytes.
+    const overhead = new TextEncoder().encode(JSON.stringify({ content: '' })).byteLength;
+    const accents = 'é'.repeat(1_000_000);
+    const fits = accents + 'a'.repeat(MAX_UPLOAD_FILE_BYTES - overhead - 2 * accents.length);
+    mockFetch.mockResolvedValueOnce(mockJsonResponse({ document_id: 'd', chunks_count: 1 }));
+    await client.ragUpload(fits);
+    const sent = String(mockFetch.mock.calls.at(-1)?.[1]?.body);
+    expect(new TextEncoder().encode(sent).byteLength).toBe(MAX_UPLOAD_FILE_BYTES);
+    await expect(client.ragUpload(fits + 'a')).rejects.toThrow('10 MB limit once encoded');
+    await expect(client.ragUpload(fits, 'f.txt')).rejects.toThrow('10 MB limit once encoded');
+    const wide = 'é'.repeat(6_000_000);
+    expect(wide.length).toBeLessThan(MAX_UPLOAD_FILE_BYTES);
+    await expect(client.ragUpload(wide)).rejects.toThrow('10 MB limit once encoded');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('uploadFile() reads a path and sends it as multipart with title and piiPolicy', async () => {
+    const uploadResp: UploadFileResponse = {
+      document_id: 'doc-1',
+      chunks_count: 3,
+      content_type: 'pdf',
+      quality: {
+        score: 0.8, label: 'high', word_count: 120,
+        line_density: 0.9, avg_line_length: 40, paragraph_count: 4,
+      },
+    };
+    mockFetch.mockResolvedValueOnce(mockJsonResponse(uploadResp));
+    const dir = mkdtempSync(join(tmpdir(), 'wauldo-upload-'));
+    const path = join(dir, 'contract.pdf');
+    writeFileSync(path, '%PDF-1.4 fake');
+    try {
+      const result = await client.uploadFile(path, { title: 'Q3 Contract', piiPolicy: 'keep' });
+      expect(result.quality?.label).toBe('high');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    const [url, init] = mockFetch.mock.calls.at(-1) ?? [];
+    expect(String(url)).toBe('http://test-server:3000/v1/upload-file');
+    expect(init?.method).toBe('POST');
+    const form = init?.body as FormData;
+    expect(form).toBeInstanceOf(FormData);
+    const file = form.get('file') as File;
+    expect(file.name).toBe('contract.pdf');
+    expect(await file.text()).toBe('%PDF-1.4 fake');
+    expect(form.get('title')).toBe('Q3 Contract');
+    expect(form.get('pii_policy')).toBe('keep');
+    // fetch sets the multipart Content-Type (with its boundary) itself.
+    const headers = init?.headers as Record<string, string>;
+    expect(Object.keys(headers).map((h) => h.toLowerCase())).not.toContain('content-type');
+  });
+
+  it('uploadFile() sends bytes under the given name, with no optional field by default', async () => {
+    mockFetch.mockResolvedValueOnce(mockJsonResponse({ document_id: 'd', chunks_count: 1 }));
+    await client.uploadFile(new TextEncoder().encode('hello'), { filename: 'notes.txt' });
+    const form = mockFetch.mock.calls.at(-1)?.[1]?.body as FormData;
+    expect((form.get('file') as File).name).toBe('notes.txt');
+    expect(form.has('title')).toBe(false);
+    expect(form.has('pii_policy')).toBe(false);
+  });
+
+  it('uploadFile() refuses empty, oversized and unknown-policy uploads before sending', async () => {
+    await expect(client.uploadFile(new Uint8Array(0))).rejects.toThrow('empty');
+    await expect(
+      client.uploadFile(new Uint8Array(MAX_UPLOAD_FILE_BYTES + 1)),
+    ).rejects.toThrow('10 MB');
+    await expect(
+      client.uploadFile(new Uint8Array(1), { piiPolicy: 'tag' as unknown as 'keep' }),
+    ).rejects.toThrow('piiPolicy must be');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('uploadFile() counts the whole request against the 10 MB limit', async () => {
+    // The server's limit applies to the multipart body, not the file: a file
+    // of exactly 10 MB used to pass the check and be refused unread.
+    const empty = new FormData();
+    empty.append('file', new Blob([]), 'big.pdf');
+    empty.append('title', 'T');
+    const overhead = (await new Response(empty).arrayBuffer()).byteLength;
+    const fits = MAX_UPLOAD_FILE_BYTES - overhead;
+    mockFetch.mockResolvedValueOnce(mockJsonResponse({ document_id: 'd', chunks_count: 1 }));
+    await client.uploadFile(new Uint8Array(fits), { filename: 'big.pdf', title: 'T' });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const sent = mockFetch.mock.calls.at(-1)?.[1]?.body as FormData;
+    expect((await new Response(sent).arrayBuffer()).byteLength).toBe(MAX_UPLOAD_FILE_BYTES);
+    await expect(
+      client.uploadFile(new Uint8Array(fits + 1), { filename: 'big.pdf', title: 'T' }),
+    ).rejects.toThrow('file name and form fields included');
+    await expect(
+      client.uploadFile(new Uint8Array(MAX_UPLOAD_FILE_BYTES), { filename: 'big.pdf' }),
+    ).rejects.toThrow('10 MB');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('ragQuery() returns query results', async () => {

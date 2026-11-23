@@ -85,6 +85,29 @@ export interface RagUploadResponse {
   chunks_count: number;
 }
 
+/** Quality of the text extracted from an uploaded file (absent for images). */
+export interface DocumentQuality {
+  /** Composite score, 0-1. */
+  score: number;
+  /** `high`, `medium` or `low`. */
+  label: string;
+  word_count: number;
+  line_density: number;
+  avg_line_length: number;
+  paragraph_count: number;
+}
+
+/** Response of `uploadFile` (POST /v1/upload-file). */
+export interface UploadFileResponse {
+  document_id: string;
+  chunks_count: number;
+  indexed_at?: string;
+  /** `text`, `image`, `pdf` or `docx`. */
+  content_type?: string;
+  trace_id?: string;
+  quality?: DocumentQuality;
+}
+
 export interface RagSource {
   document_id: string;
   content: string;
@@ -264,6 +287,17 @@ export type PiiPolicy = 'redact' | 'keep';
 export interface RagUploadOptions extends RequestOptions {
   /** Default: the server's, `redact`. Use `keep` for contact details your answers must quote. */
   piiPolicy?: PiiPolicy;
+}
+
+/** Options for `uploadFile` — transport options, title and PII policy */
+export interface UploadFileOptions extends RagUploadOptions {
+  /** Document title stored with its passages. */
+  title?: string;
+  /**
+   * File name sent to the server, which reads the type from its extension
+   * (`report.pdf`). Default: the path's last component, or `upload` for bytes.
+   */
+  filename?: string;
 }
 
 /** Options for `factCheck` / `guard` — transport options plus relevance scoring */

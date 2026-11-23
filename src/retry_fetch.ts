@@ -36,13 +36,15 @@ export async function fetchWithRetry<T>(
       config.onLog?.('debug', `${method} ${path} (attempt ${attempt + 1})`);
       config.onRequest?.(method, path);
       const start = Date.now();
+      const isForm = body instanceof FormData;
       const options: RequestInit = {
         method,
-        headers: config.headers,
+        // A form sets its own multipart Content-Type, boundary included.
+        headers: isForm ? withoutContentType(config.headers) : config.headers,
         signal: AbortSignal.timeout(effectiveTimeout),
       };
       if (body !== undefined && method !== 'GET' && method !== 'HEAD') {
-        options.body = JSON.stringify(body);
+        options.body = isForm ? body : JSON.stringify(body);
       }
       const resp = await fetch(`${config.baseUrl}${path}`, options);
       const durationMs = Date.now() - start;
@@ -83,6 +85,12 @@ export async function fetchWithRetry<T>(
   const finalErr = lastError ?? new Error('Request failed after retries');
   config.onError?.(finalErr);
   throw finalErr;
+}
+
+function withoutContentType(headers: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'content-type'),
+  );
 }
 
 function computeBackoff(retryBackoffMs: number, attempt: number, resp: Response): number {

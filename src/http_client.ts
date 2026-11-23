@@ -4,6 +4,8 @@
  * Uses Node 18+ built-in fetch — zero external dependencies.
  */
 
+import { readFile, stat } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { Conversation } from './conversation.js';
 import { ServerError, ValidationError } from './errors.js';
 import type {
@@ -21,6 +23,8 @@ import type {
   RagUploadResponse,
   RequestOptions,
   SourceChunk,
+  UploadFileOptions,
+  UploadFileResponse,
   VerifyCitationResponse,
 } from './http_types.js';
 import { fetchWithRetry, type RetryConfig } from './retry_fetch.js';
@@ -32,6 +36,77 @@ function validateResponse<T>(data: unknown, typeName: string): T {
     throw new ServerError(`Invalid ${typeName}: response is null`, 0);
   }
   return data as T;
+}
+
+/**
+ * Largest upload the server reads: 10 MB. The limit counts the whole request
+ * (the file, its name and the form fields), so the file itself must be a few
+ * hundred bytes smaller; `uploadFile` refuses a larger request before sending.
+ */
+export const MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024;
+
+/** `piiPolicy` as sent: `undefined` when unset, a ValidationError when unknown. */
+function checkPiiPolicy(policy: unknown): 'redact' | 'keep' | undefined {
+  if (policy === undefined) return undefined;
+  if (policy !== 'redact' && policy !== 'keep') {
+    throw new ValidationError(`piiPolicy must be "redact" or "keep", got "${String(policy)}"`, 'piiPolicy');
+  }
+  return policy;
+}
+
+/**
+ * The file of an upload as a Blob, and its name. An empty file, or one over
+ * 10 MB, is refused before it is read or sent.
+ */
+async function readUploadSource(
+  file: string | Blob | Uint8Array | ArrayBuffer, filename?: string,
+): Promise<{ data: Blob; name: string }> {
+  let data: Blob;
+  if (typeof file === 'string') {
+    checkUploadSize((await stat(file)).size);
+    data = new Blob([await readFile(file)]);
+  } else {
+    data = file instanceof Blob ? file : new Blob([file]);
+  }
+  checkUploadSize(data.size);
+  const name = filename ?? (typeof file === 'string' ? basename(file) : 'upload');
+  return { data, name };
+}
+
+/**
+ * Refuse a form whose encoded body is over the server's limit. Measured with
+ * the runtime's own encoder, the one `fetch` uses to send it.
+ */
+async function checkUploadBodySize(form: FormData): Promise<void> {
+  const size = (await new Response(form).arrayBuffer()).byteLength;
+  if (size > MAX_UPLOAD_FILE_BYTES) {
+    throw new ValidationError(
+      `Upload exceeds the 10 MB limit (${size} > ${MAX_UPLOAD_FILE_BYTES} bytes, file name and form fields included)`,
+      'file',
+    );
+  }
+}
+
+/**
+ * Refuse a text upload whose JSON body is over the server's limit. The limit
+ * counts bytes as sent (UTF-8), not characters: an accented letter takes two
+ * bytes, most CJK characters three, an emoji four.
+ */
+function checkTextUploadSize(body: Record<string, unknown>): void {
+  const size = new TextEncoder().encode(JSON.stringify(body)).byteLength;
+  if (size > MAX_UPLOAD_FILE_BYTES) {
+    throw new ValidationError(
+      `Content exceeds the 10 MB limit once encoded (${size} > ${MAX_UPLOAD_FILE_BYTES} bytes as UTF-8)`,
+      'content',
+    );
+  }
+}
+
+function checkUploadSize(size: number): void {
+  if (size === 0) throw new ValidationError('The file is empty', 'file');
+  if (size > MAX_UPLOAD_FILE_BYTES) {
+    throw new ValidationError(`File exceeds the 10 MB limit (${size} > ${MAX_UPLOAD_FILE_BYTES} bytes)`, 'file');
+  }
 }
 
 export class HttpClient {
@@ -147,7 +222,9 @@ export class HttpClient {
   /**
    * POST /v1/upload — Upload document for RAG indexing.
    *
-   * @param content - The document text to index
+   * @param content - The document text to index. The 10 MB limit counts the
+   *   request as sent (UTF-8 bytes, file name included): a larger one is
+   *   refused with `ValidationError` before sending.
    * @param filename - Optional filename for the document
    * @param options - Optional per-request overrides (e.g. timeoutMs) and
    *   `piiPolicy` (`redact` — the server default — or `keep`)
@@ -158,16 +235,40 @@ export class HttpClient {
   ): Promise<RagUploadResponse> {
     const body: Record<string, unknown> = { content };
     if (filename) body['filename'] = filename;
-    if (options?.piiPolicy !== undefined) {
-      if (options.piiPolicy !== 'redact' && options.piiPolicy !== 'keep') {
-        throw new ValidationError(`piiPolicy must be "redact" or "keep", got "${String(options.piiPolicy)}"`, 'piiPolicy');
-      }
-      body['pii_policy'] = options.piiPolicy;
-    }
+    const piiPolicy = checkPiiPolicy(options?.piiPolicy);
+    if (piiPolicy !== undefined) body['pii_policy'] = piiPolicy;
+    checkTextUploadSize(body);
     const data = await fetchWithRetry<RagUploadResponse>(
       this.retryConfig, 'POST', '/v1/upload', body, options?.timeoutMs,
     );
     return validateResponse<RagUploadResponse>(data, 'RagUploadResponse');
+  }
+
+  /**
+   * POST /v1/upload-file — Upload a file (PDF, DOCX, image, text) for RAG
+   * indexing; the server extracts its text. 10 MB at most for the whole
+   * request (file, name and fields): a larger one is refused before sending.
+   *
+   * @param file - A path to read (Node), or the file's bytes
+   * @param options - `title`, `piiPolicy` (`redact` — the server default — or
+   *   `keep`), `filename` (the server reads the type from its extension) and
+   *   `timeoutMs`
+   * @returns document_id, chunks_count, content_type and the extraction quality
+   */
+  async uploadFile(
+    file: string | Blob | Uint8Array | ArrayBuffer, options?: UploadFileOptions,
+  ): Promise<UploadFileResponse> {
+    const piiPolicy = checkPiiPolicy(options?.piiPolicy);
+    const { data, name } = await readUploadSource(file, options?.filename);
+    const form = new FormData();
+    form.append('file', data, name);
+    if (options?.title) form.append('title', options.title);
+    if (piiPolicy !== undefined) form.append('pii_policy', piiPolicy);
+    await checkUploadBodySize(form);
+    const resp = await fetchWithRetry<UploadFileResponse>(
+      this.retryConfig, 'POST', '/v1/upload-file', form, options?.timeoutMs,
+    );
+    return validateResponse<UploadFileResponse>(resp, 'UploadFileResponse');
   }
 
   /** POST /v1/query — Query RAG knowledge base */

@@ -96,7 +96,7 @@ Wauldo:       "Refunds are processed within 60 days"     ← verified
 ```typescript
 // Upload — text extraction + quality scoring happens server-side
 const upload = await client.uploadFile(filePath, { title: 'Q3 Contract' });
-console.log(`Extracted ${upload.chunks_count} chunks, quality: ${upload.quality_label}`);
+console.log(`Extracted ${upload.chunks_count} chunks, quality: ${upload.quality?.label ?? 'n/a'}`);
 
 // Query
 const result = await client.ragQuery('What are the payment terms?');
@@ -164,6 +164,8 @@ console.log(task.verification?.message);      // Human-readable context when non
 // Need progress events? Start the run, then stream each workflow state as it completes.
 const run = await agents.run(agent.id, 'Can I return a shirt 30 days after purchase?');
 for await (const event of agents.streamTask(run.task_id)) {
+  // STREAM_LAGGED is a notice, not a state: the stream fell behind, the run goes on and
+  // the terminal event still comes (agents.getTask holds every state of the run).
   console.log(`  ${event.state_name}: ${event.duration_ms}ms  (${event.completion_tokens} tok)`);
   if (isTerminalTransition(event)) { // last event: result + verification, nothing left to fetch
     console.log(terminalPayload(event)?.result ?? event.condition); // payload null when withheld
